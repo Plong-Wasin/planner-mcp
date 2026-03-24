@@ -603,7 +603,11 @@ server.registerTool(
         ],
       };
     } catch (error: any) {
-      log("ERROR", "Error in get_task", { taskId, error: error?.message || String(error), stack: error?.stack });
+      log("ERROR", "Error in get_task", {
+        taskId,
+        error: error?.message || String(error),
+        stack: error?.stack,
+      });
       return {
         content: [
           {
@@ -648,7 +652,14 @@ server.registerTool(
     dueDateTime,
   }) => {
     try {
-      log("INFO", "create_task called", { planId, bucketId, title, description, assignments, dueDateTime });
+      log("INFO", "create_task called", {
+        planId,
+        bucketId,
+        title,
+        description,
+        assignments,
+        dueDateTime,
+      });
 
       const client = getGraphClient();
 
@@ -695,7 +706,10 @@ server.registerTool(
         ],
       };
     } catch (error: any) {
-      log("ERROR", "Error in create_task", { error: error?.message || String(error), stack: error?.stack });
+      log("ERROR", "Error in create_task", {
+        error: error?.message || String(error),
+        stack: error?.stack,
+      });
       return {
         content: [
           {
@@ -740,7 +754,14 @@ server.registerTool(
     dueDateTime,
   }) => {
     try {
-      log("INFO", "update_task called", { taskId, title, description, bucketId, assignments, dueDateTime });
+      log("INFO", "update_task called", {
+        taskId,
+        title,
+        description,
+        bucketId,
+        assignments,
+        dueDateTime,
+      });
 
       const client = getGraphClient();
 
@@ -777,11 +798,11 @@ server.registerTool(
 
       log("INFO", "Updating task with data", { taskId, taskData });
       // Use If-Match header with the task's ETag
-      const task = await client
+      await client
         .api(`/planner/tasks/${taskId}`)
         .header("If-Match", etag)
         .patch(taskData);
-      log("INFO", "Task updated successfully", { taskId, task });
+      log("INFO", "Task updated successfully", { taskId });
 
       // If description or dueDateTime is provided, we need to update task details
       if (description || dueDateTime) {
@@ -790,8 +811,8 @@ server.registerTool(
         const existingDetails = await client
           .api(`/planner/tasks/${taskId}/details`)
           .get();
-        const etag = existingDetails["@odata.etag"];
-        log("INFO", "Got existing details", { taskId, etag, existingDetails });
+        const detailsEtag = existingDetails["@odata.etag"];
+        log("INFO", "Got existing details", { taskId, detailsEtag, existingDetails });
 
         const detailsData: any = {};
 
@@ -805,23 +826,32 @@ server.registerTool(
 
         log("INFO", "Updating task details with data", { taskId, detailsData });
         // Use the ETag from existing details
-        const updatedDetails = await client
+        await client
           .api(`/planner/tasks/${taskId}/details`)
-          .header("If-Match", etag)
+          .header("If-Match", detailsEtag)
           .patch(detailsData);
-        log("INFO", "Task details updated successfully", { taskId, updatedDetails });
+        log("INFO", "Task details updated successfully", { taskId });
       }
+
+      // Fetch the updated task to return current data
+      log("INFO", "Fetching updated task", { taskId });
+      const updatedTask = await client.api(`/planner/tasks/${taskId}`).get();
+      log("INFO", "Got updated task", { taskId, updatedTask });
 
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(task, null, 2),
+            text: JSON.stringify(updatedTask, null, 2),
           },
         ],
       };
     } catch (error) {
-      log("ERROR", "Error in update_task", { taskId, error: (error as any)?.message || String(error), stack: (error as any)?.stack });
+      log("ERROR", "Error in update_task", {
+        taskId,
+        error: (error as any)?.message || String(error),
+        stack: (error as any)?.stack,
+      });
       return {
         content: [
           {
