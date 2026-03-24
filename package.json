@@ -6,8 +6,7 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "start": "node build/index.js",
-    "test-update-task": "tsx src/test-update-task.ts"
+    "start": "node build/index.js"
   },
   "keywords": ["mcp", "planner", "microsoft-graph", "tasks"],
   "author": "",
