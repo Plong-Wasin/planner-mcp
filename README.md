@@ -63,11 +63,17 @@ The access token will be saved locally and reused for future sessions.
 
 ### Task Tools
 
-- **`list_tasks`**: List tasks in a plan or bucket
+- **`list_tasks`**: List tasks in a plan or bucket with filtering options (priority, due date, status, etc.)
 - **`get_task`**: Get detailed information about a specific task
-- **`create_task`**: Create a new task in a bucket
-- **`update_task`**: Update an existing task
+- **`create_task`**: Create a new task in a bucket with title, description, priority, and due date
+- **`update_task`**: Update an existing task (title, description, priority, bucket, due date, etc.)
 - **`delete_task`**: Delete a task
+
+**Priority Levels:**
+- `1` = Urgent (highest priority)
+- `3` = Important (high priority)
+- `5` = Medium (normal priority)
+- `9` = Low (lowest priority)
 
 ## Usage with Claude Desktop
 
@@ -100,12 +106,38 @@ The Microsoft Graph API requires the following permissions for Planner:
 
 1. List plans: `list_plans`
 2. List buckets in a plan: `list_buckets` with the plan ID
-3. Create a task: `create_task` with plan ID, bucket ID, and task details
+3. Create a task: `create_task` with plan ID, bucket ID, title, and priority (1=urgent, 3=important, 5=medium, 9=low)
+
+Example:
+```json
+{
+  "planId": "your-plan-id",
+  "bucketId": "your-bucket-id",
+  "title": "Complete project proposal",
+  "description": "Write and submit the Q1 project proposal",
+  "priority": 1,
+  "dueDateTime": "2026-03-30T17:00:00Z"
+}
+```
 
 ### Move a task to another bucket
 
 1. Get task details: `get_task`
 2. Update task: `update_task` with the new bucket ID
+
+### Filter tasks by priority
+
+1. List tasks with priority filter: `list_tasks` with plan ID and priority parameter
+
+Example:
+```json
+{
+  "planId": "your-plan-id",
+  "priority": 1
+}
+```
+
+This will show only urgent tasks (priority 1).
 
 ### Update task due date
 
