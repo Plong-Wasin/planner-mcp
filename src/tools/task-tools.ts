@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import Fuse from "fuse.js";
 import { getGraphClient } from "../graph/client.js";
 import { handleGraphError } from "../utils/error-handler.js";
 import { log } from "../utils/logger.js";
@@ -25,13 +26,13 @@ export function registerTaskTools(server: McpServer): void {
           .optional()
           .describe("Filter by archived status (true/false/undefined for both)"),
         percentComplete: z
-          .number()
+          .string()
           .optional()
-          .describe("Filter by percent complete (0-100), can use 0 for not started, 100 for completed"),
+          .describe("Filter by percent complete. Supports comparison operators: '>50', '>=50', '<100', '<=100', or exact value '50'. Use 0 for not started, 100 for completed"),
         priority: z
-          .union([z.literal(1), z.literal(3), z.literal(5), z.literal(9)])
+          .array(z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(9)]))
           .optional()
-          .describe("Filter by priority (1=urgent, 3=important, 5=medium, 9=low)"),
+          .describe("Filter by priority, supports multiple values (OR logic). e.g. [1,3] for urgent+important. Values: 1=urgent, 3=important, 5=medium, 9=low"),
         assignedToMe: z
           .boolean()
           .optional()
@@ -78,14 +79,24 @@ export function registerTaskTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe("Include task details (description, checklist, references) via $expand=details"),
-        assignedToUserId: z
-          .string()
+        assignedToUserIds: z
+          .array(z.string())
           .optional()
-          .describe("Filter tasks assigned to a specific user ID (e.g., 'b36c8f39-74bb-48ff-b79c-8e01c1ed08ec')"),
+          .describe("Filter tasks assigned to any of the specified user IDs (OR logic). e.g. ['user-id-1', 'user-id-2']"),
         appliedCategories: z
           .string()
           .optional()
           .describe("Filter tasks by categories, comma-separated (e.g., 'category1' or 'category1,category3'). Returns tasks that have ALL specified categories set to true."),
+        search: z
+          .string()
+          .optional()
+          .describe("Search tasks by keyword using fuzzy matching. Matches against title, and description if includeDetails is true."),
+        searchThreshold: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Fuzzy search sensitivity: 0.0 = exact match only, 1.0 = match anything. Default is 0.4."),
       },
     },
     async ({
@@ -105,8 +116,10 @@ export function registerTaskTools(server: McpServer): void {
       skip,
       fields,
       includeDetails,
-      assignedToUserId,
+      assignedToUserIds,
       appliedCategories,
+      search,
+      searchThreshold,
     }) => {
       try {
         log("INFO", "list_tasks called", {
@@ -126,8 +139,10 @@ export function registerTaskTools(server: McpServer): void {
           skip,
           fields,
           includeDetails,
-          assignedToUserId,
+          assignedToUserIds,
           appliedCategories,
+          search,
+          searchThreshold,
         });
 
         const client = await getGraphClient();
@@ -137,8 +152,40 @@ export function registerTaskTools(server: McpServer): void {
         const queryParams: string[] = [];
 
         // Add $select for field selection (server-side) - Planner API supports this!
+        // Auto-inject fields required by active client-side filters so they're always present.
         if (fields) {
-          queryParams.push(`$select=${encodeURIComponent(fields)}`);
+          const selectedFields = new Set(fields.split(",").map((f) => f.trim()).filter(Boolean));
+          if ((assignedToMe || (assignedToUserIds && assignedToUserIds.length > 0)) && !selectedFields.has("assignments")) {
+            selectedFields.add("assignments");
+          }
+          if (bucketId && !selectedFields.has("bucketId")) {
+            selectedFields.add("bucketId");
+          }
+          if (isArchived !== undefined && !selectedFields.has("isArchived")) {
+            selectedFields.add("isArchived");
+          }
+          if (percentComplete !== undefined && !selectedFields.has("percentComplete")) {
+            selectedFields.add("percentComplete");
+          }
+          if (priority !== undefined && !selectedFields.has("priority")) {
+            selectedFields.add("priority");
+          }
+          if (appliedCategories && !selectedFields.has("appliedCategories")) {
+            selectedFields.add("appliedCategories");
+          }
+          if ((dueBefore || dueAfter) && !selectedFields.has("dueDateTime")) {
+            selectedFields.add("dueDateTime");
+          }
+          if ((createdAfter || createdBefore) && !selectedFields.has("createdDateTime")) {
+            selectedFields.add("createdDateTime");
+          }
+          if ((completedAfter || completedBefore) && !selectedFields.has("completedDateTime")) {
+            selectedFields.add("completedDateTime");
+          }
+          if (search && !selectedFields.has("title")) {
+            selectedFields.add("title");
+          }
+          queryParams.push(`$select=${encodeURIComponent([...selectedFields].join(","))}`);
         }
 
         // Add $expand=details to fetch task details (description, checklist, references) inline
@@ -180,36 +227,49 @@ export function registerTaskTools(server: McpServer): void {
             log("INFO", "Filtered by isArchived", { isArchived, count: filteredTasks.length });
           }
 
-          // Filter by percentComplete
+          // Filter by percentComplete (supports comparison operators: >50, >=50, <100, <=100, or exact value 50)
           if (percentComplete !== undefined) {
-            filteredTasks = filteredTasks.filter((task: any) => task.percentComplete === percentComplete);
+            const match = percentComplete.match(/^(>=|<=|>|<|=)?(\d+)$/);
+            if (match) {
+              const op = match[1] || "=";
+              const val = parseInt(match[2], 10);
+              filteredTasks = filteredTasks.filter((task: any) => {
+                const pc = task.percentComplete ?? 0;
+                if (op === ">") return pc > val;
+                if (op === ">=") return pc >= val;
+                if (op === "<") return pc < val;
+                if (op === "<=") return pc <= val;
+                return pc === val;
+              });
+            }
             log("INFO", "Filtered by percentComplete", { percentComplete, count: filteredTasks.length });
           }
 
-          // Filter by priority
-          if (priority !== undefined) {
-            filteredTasks = filteredTasks.filter((task: any) => task.priority === priority);
+          // Filter by priority (supports multiple values, OR logic)
+          if (priority !== undefined && priority.length > 0) {
+            const prioritySet = new Set(priority);
+            filteredTasks = filteredTasks.filter((task: any) => prioritySet.has(task.priority));
             log("INFO", "Filtered by priority", { priority, count: filteredTasks.length });
           }
 
-          // Filter by assignedToMe (only works if we have user context)
+          // Filter by assignedToMe — fetch current user ID via /me
           if (assignedToMe !== undefined && assignedToMe) {
-            // This requires knowing the current user's ID
-            // For now, we'll filter tasks that have any assignments
+            const me = await client.api("/me").select("id").get();
+            const myId = me.id as string;
             filteredTasks = filteredTasks.filter((task: any) => {
               const assignments = task.assignments || {};
-              return Object.keys(assignments).length > 0;
+              return myId in assignments;
             });
-            log("INFO", "Filtered by assignedToMe", { count: filteredTasks.length });
+            log("INFO", "Filtered by assignedToMe", { myId, count: filteredTasks.length });
           }
 
-          // Filter by specific user ID in assignments
-          if (assignedToUserId) {
+          // Filter by multiple user IDs in assignments (OR logic — task assigned to ANY of them)
+          if (assignedToUserIds && assignedToUserIds.length > 0) {
             filteredTasks = filteredTasks.filter((task: any) => {
               const assignments = task.assignments || {};
-              return assignedToUserId in assignments;
+              return assignedToUserIds.some((uid: string) => uid in assignments);
             });
-            log("INFO", "Filtered by assignedToUserId", { assignedToUserId, count: filteredTasks.length });
+            log("INFO", "Filtered by assignedToUserIds", { assignedToUserIds, count: filteredTasks.length });
           }
 
           // Filter by appliedCategories - task must have ALL specified categories set to true
@@ -222,14 +282,35 @@ export function registerTaskTools(server: McpServer): void {
             log("INFO", "Filtered by appliedCategories", { appliedCategories, count: filteredTasks.length });
           }
 
+          // Fuzzy search using Fuse.js (client-side)
+          if (search) {
+            const fuseKeys = includeDetails
+              ? ["title", "details.description"]
+              : ["title"];
+            const fuse = new Fuse(filteredTasks, {
+              keys: fuseKeys,
+              threshold: searchThreshold ?? 0.4,
+              includeScore: true,
+              ignoreLocation: true,
+            });
+            filteredTasks = fuse.search(search).map((result) => result.item);
+            log("INFO", "Fuzzy search applied", { search, threshold: searchThreshold ?? 0.4, keys: fuseKeys, count: filteredTasks.length });
+          }
+
           // Filter by due date
           if (dueBefore) {
             const beforeDate = parseDate(dueBefore);
             if (beforeDate) {
+              // If input has no time component (relative keyword or ISO date-only),
+              // treat beforeDate as start-of-day and include the full day by using exclusive < next day
+              const isDateOnly = !dueBefore.includes("T") && !dueBefore.includes(":");
+              const exclusiveEnd = isDateOnly
+                ? new Date(beforeDate.getTime() + 24 * 60 * 60 * 1000)
+                : beforeDate;
               filteredTasks = filteredTasks.filter((task: any) => {
                 if (!task.dueDateTime) return false;
                 const dueDate = new Date(task.dueDateTime);
-                return dueDate <= beforeDate;
+                return dueDate < exclusiveEnd;
               });
               log("INFO", "Filtered by dueBefore", { dueBefore, count: filteredTasks.length });
             }
@@ -433,7 +514,7 @@ export function registerTaskTools(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Labels/categories as JSON string with category names as keys and boolean values (e.g., '{\"category1\":true,\"category3\":true}') (optional)",
+            "Labels/categories as JSON string with category names as keys and boolean values. To ADD a tag set it to true (e.g., '{\"category1\":true}'). To REMOVE a tag you MUST set it to false (e.g., '{\"category1\":false}') — sending {} will NOT remove anything.",
           ),
       },
     },
@@ -632,7 +713,7 @@ export function registerTaskTools(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Labels/categories as JSON string with category names as keys and boolean values (e.g., '{\"category1\":true,\"category3\":true}') (optional)",
+            "Labels/categories as JSON string with category names as keys and boolean values. To ADD a tag set it to true (e.g., '{\"category1\":true}'). To REMOVE a tag you MUST set it to false (e.g., '{\"category1\":false}') — sending {} will NOT remove anything.",
           ),
       },
     },

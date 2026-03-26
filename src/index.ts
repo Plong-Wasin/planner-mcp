@@ -7,6 +7,7 @@ import { registerPlanTools } from "./tools/plan-tools.js";
 import { registerBucketTools } from "./tools/bucket-tools.js";
 import { registerTaskTools } from "./tools/task-tools.js";
 import { registerGroupTools } from "./tools/group-tools.js";
+import { registerUserTools } from "./tools/user-tools.js";
 
 // Create server instance
 const server = new McpServer({
@@ -20,6 +21,7 @@ registerPlanTools(server);
 registerBucketTools(server);
 registerTaskTools(server);
 registerGroupTools(server);
+registerUserTools(server);
 
 // Start the server
 async function main() {
