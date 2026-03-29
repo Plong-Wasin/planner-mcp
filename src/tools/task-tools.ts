@@ -6,6 +6,13 @@ import { handleGraphError } from "../utils/error-handler.js";
 import { log } from "../utils/logger.js";
 import { parseDate } from "../utils/date-parser.js";
 
+const assignmentValue = z
+  .object({
+    "@odata.type": z.literal("microsoft.graph.plannerAssignment"),
+    orderHint: z.string(),
+  })
+  .nullable();
+
 export function registerTaskTools(server: McpServer): void {
   // Register list tasks tool
   server.registerTool(
@@ -489,9 +496,9 @@ export function registerTaskTools(server: McpServer): void {
           .optional()
           .describe("Task description (optional)"),
         assignments: z
-          .string()
+          .record(z.string(), assignmentValue)
           .optional()
-          .describe("Task assignments as JSON string (optional)"),
+          .describe("Assignments keyed by user ID. Use null to remove, or plannerAssignment object to add/update."),
         startDateTime: z
           .string()
           .optional()
@@ -553,18 +560,7 @@ export function registerTaskTools(server: McpServer): void {
         };
 
         if (assignments) {
-          try {
-            taskData.assignments = JSON.parse(assignments);
-          } catch (e) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: Invalid JSON in assignments parameter`,
-                },
-              ],
-            };
-          }
+          taskData.assignments = assignments;
         }
 
         // Add startDateTime if provided (task property, NOT details)
@@ -688,9 +684,9 @@ export function registerTaskTools(server: McpServer): void {
           .describe("New task description (optional)"),
         bucketId: z.string().optional().describe("New bucket ID (optional)"),
         assignments: z
-          .string()
+          .record(z.string(), assignmentValue)
           .optional()
-          .describe("New assignments as JSON string (optional)"),
+          .describe("Assignments keyed by user ID. Use null to remove, or plannerAssignment object to add/update."),
         startDateTime: z
           .string()
           .optional()
@@ -762,18 +758,7 @@ export function registerTaskTools(server: McpServer): void {
         }
 
         if (assignments) {
-          try {
-            taskData.assignments = JSON.parse(assignments);
-          } catch (e) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: Invalid JSON in assignments parameter`,
-                },
-              ],
-            };
-          }
+          taskData.assignments = assignments;
         }
 
         // Add startDateTime if provided (task property, NOT details)
