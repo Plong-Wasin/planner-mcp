@@ -44,6 +44,35 @@ Before using the Planner tools, you need to authenticate:
 
 The access token will be saved locally and reused for future sessions.
 
+## Configuration
+
+### Option 1: Using CLI (Recommended)
+
+```bash
+claude mcp add --transport stdio \
+  planner -- node /path/to/planner-mcp/build/index.js
+```
+
+### Option 2: Manual Configuration
+
+Add this server to your Claude Desktop configuration file:
+
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "planner": {
+      "command": "node",
+      "args": ["/path/to/planner-mcp/build/index.js"]
+    }
+  }
+}
+```
+
+> **Note:** Replace `/path/to/planner-mcp/build/index.js` with the actual path to your cloned repository.
+
 ## Available Tools
 
 ### Authentication Tools
@@ -74,24 +103,6 @@ The access token will be saved locally and reused for future sessions.
 - `3` = Important (high priority)
 - `5` = Medium (normal priority)
 - `9` = Low (lowest priority)
-
-## Usage with Claude Desktop
-
-Add this server to your Claude Desktop configuration file:
-
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "planner": {
-      "command": "node",
-      "args": ["C:\\path\\to\\planner-mcp\\build\\index.js"]
-    }
-  }
-}
-```
 
 ## Required Permissions
 
