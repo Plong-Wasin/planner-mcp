@@ -21,7 +21,7 @@
     "planner-mcp": "./build/index.js"
   },
   "dependencies": {
-    "@azure/identity": "^4.13.0",
+    "@azure/identity": "^4.13.1",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "fuse.js": "^7.1.0",
@@ -34,5 +34,8 @@
   },
   "files": [
     "build"
-  ]
+  ],
+  "overrides": {
+    "uuid": "^14.0.0"
+  }
 }
