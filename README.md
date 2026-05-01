@@ -49,8 +49,7 @@ The access token will be saved locally and reused for future sessions.
 ### Option 1: Using CLI (Recommended)
 
 ```bash
-claude mcp add --transport stdio \
-  planner -- node /path/to/planner-mcp/build/index.js
+claude mcp add --transport stdio planner node /path/to/planner-mcp/build/index.js
 ```
 
 ### Option 2: Manual Configuration
