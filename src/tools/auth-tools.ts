@@ -8,7 +8,7 @@ export function registerAuthTools(server: McpServer): void {
     "auth_start",
     {
       description:
-        "Start the Planner authentication flow. This will display a verification URL and code that you need to use to sign in.",
+        "Start the Planner authentication flow. IMPORTANT: Only call this tool when you receive an authentication error (e.g. 'Not authenticated') from another tool, or when the user explicitly requests re-authentication. Do NOT call this proactively before using other Planner tools - they automatically use the stored token. If a valid token already exists, this returns immediately without starting a new auth flow.",
       inputSchema: {
         clientId: z
           .string()
@@ -44,7 +44,7 @@ export function registerAuthTools(server: McpServer): void {
     "auth_poll",
     {
       description:
-        "Check if the authentication is complete. Call this after using auth_start and completing the sign-in process on the Microsoft website.",
+        "Check if the authentication is complete. Only call this after auth_start returned a verification URL and the user has completed sign-in on the Microsoft website. Do NOT call this unless you just ran auth_start and it returned a code/URL for the user to visit.",
       inputSchema: {},
     },
     async () => {
