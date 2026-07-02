@@ -643,6 +643,23 @@ export function registerTaskTools(server: McpServer): void {
               throw getError; // Re-throw other errors
             }
           }
+
+          // The `task` object above was captured before the details PATCH, so it
+          // still has hasDescription=false and no `details` key. Re-fetch with
+          // $expand=details so the response reflects what was actually saved.
+          const refreshedTask = await client
+            .api(`/planner/tasks/${taskId}?$expand=details`)
+            .get();
+          log("INFO", "Fetched task with details after description update", { taskId, refreshedTask });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(refreshedTask, null, 2),
+              },
+            ],
+          };
         }
 
         return {
@@ -829,9 +846,13 @@ export function registerTaskTools(server: McpServer): void {
           log("INFO", "Task details updated successfully", { taskId });
         }
 
-        // Fetch the updated task to return current data
+        // Fetch the updated task to return current data. Expand details when the
+        // description was touched so the response actually includes the `details` key.
         log("INFO", "Fetching updated task", { taskId });
-        const updatedTask = await client.api(`/planner/tasks/${taskId}`).get();
+        const updatedTaskEndpoint = description !== undefined
+          ? `/planner/tasks/${taskId}?$expand=details`
+          : `/planner/tasks/${taskId}`;
+        const updatedTask = await client.api(updatedTaskEndpoint).get();
         log("INFO", "Got updated task", { taskId, updatedTask });
 
         return {
