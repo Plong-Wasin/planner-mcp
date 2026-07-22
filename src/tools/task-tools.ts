@@ -13,6 +13,34 @@ const assignmentValue = z
   })
   .nullable();
 
+const checklistItemValue = z
+  .object({
+    title: z.string().optional(),
+    isChecked: z.boolean().optional(),
+  })
+  .nullable();
+
+const checklistSchema = z
+  .record(z.string(), checklistItemValue)
+  .optional()
+  .describe(
+    "Checklist items keyed by item ID. To ADD an item, use any unique string as the key (e.g. 'item-1') with {\"title\":...,\"isChecked\":...}. To UPDATE an existing item, use its item ID (from get_task with includeDetails) with the fields to change. To REMOVE an item, set its ID's value to null.",
+  );
+
+// Builds the microsoft.graph.plannerChecklistItem payload for the checklist
+// property of a plannerTaskDetails PATCH, tagging each entry with @odata.type
+// and passing through null entries (which delete the item) unchanged.
+function buildChecklistPayload(checklist: Record<string, { title?: string; isChecked?: boolean } | null>) {
+  return Object.fromEntries(
+    Object.entries(checklist).map(([itemId, value]) => [
+      itemId,
+      value === null
+        ? null
+        : { "@odata.type": "microsoft.graph.plannerChecklistItem", ...value },
+    ]),
+  );
+}
+
 export function registerTaskTools(server: McpServer): void {
   // Register list tasks tool
   server.registerTool(
@@ -523,6 +551,7 @@ export function registerTaskTools(server: McpServer): void {
           .describe(
             "Labels/categories as JSON string with category names as keys and boolean values. To ADD a tag set it to true (e.g., '{\"category1\":true}'). To REMOVE a tag you MUST set it to false (e.g., '{\"category1\":false}') — sending {} will NOT remove anything.",
           ),
+        checklist: checklistSchema,
       },
     },
     async ({
@@ -536,6 +565,7 @@ export function registerTaskTools(server: McpServer): void {
       percentComplete,
       priority,
       appliedCategories,
+      checklist,
     }) => {
       try {
         log("INFO", "create_task called", {
@@ -549,6 +579,7 @@ export function registerTaskTools(server: McpServer): void {
           percentComplete,
           priority,
           appliedCategories,
+          checklist,
         });
 
         const client = await getGraphClient();
@@ -603,15 +634,19 @@ export function registerTaskTools(server: McpServer): void {
         const task = await client.api("/planner/tasks").post(taskData);
         log("INFO", "Task created successfully", { task });
 
-        // If description is provided, we need to update task details
+        // If description or checklist is provided, we need to update task details
         // Note: dueDateTime and startDateTime are task properties, NOT details properties
-        if (description) {
+        if (description || checklist) {
           const taskId = task.id;
           log("INFO", "Creating task details", { taskId });
 
-          const detailsData: any = {
-            description: description,
-          };
+          const detailsData: any = {};
+          if (description) {
+            detailsData.description = description;
+          }
+          if (checklist) {
+            detailsData.checklist = buildChecklistPayload(checklist);
+          }
 
           // Create task details - this is a separate resource from the task itself
           // For new task details, we need to handle the ETag properly
@@ -728,6 +763,7 @@ export function registerTaskTools(server: McpServer): void {
           .describe(
             "Labels/categories as JSON string with category names as keys and boolean values. To ADD a tag set it to true (e.g., '{\"category1\":true}'). To REMOVE a tag you MUST set it to false (e.g., '{\"category1\":false}') — sending {} will NOT remove anything.",
           ),
+        checklist: checklistSchema,
       },
     },
     async ({
@@ -741,6 +777,7 @@ export function registerTaskTools(server: McpServer): void {
       percentComplete,
       priority,
       appliedCategories,
+      checklist,
     }) => {
       try {
         log("INFO", "update_task called", {
@@ -754,6 +791,7 @@ export function registerTaskTools(server: McpServer): void {
           percentComplete,
           priority,
           appliedCategories,
+          checklist,
         });
 
         const client = await getGraphClient();
@@ -822,34 +860,49 @@ export function registerTaskTools(server: McpServer): void {
           .patch(taskData);
         log("INFO", "Task updated successfully", { taskId });
 
-        // If description is provided, we need to update task details
+        // If description or checklist is provided, we need to update task details
         // Note: dueDateTime and startDateTime are task properties, NOT details properties
-        if (description) {
-          // First, get existing details to obtain ETag
-          log("INFO", "Fetching existing task details", { taskId });
-          const existingDetails = await client
-            .api(`/planner/tasks/${taskId}/details`)
-            .get();
-          const detailsEtag = existingDetails["@odata.etag"];
-          log("INFO", "Got existing details", { taskId, detailsEtag, existingDetails });
-
-          const detailsData: any = {
-            description: description,
-          };
+        if (description || checklist) {
+          const detailsData: any = {};
+          if (description) {
+            detailsData.description = description;
+          }
+          if (checklist) {
+            detailsData.checklist = buildChecklistPayload(checklist);
+          }
 
           log("INFO", "Updating task details with data", { taskId, detailsData });
-          // Use the ETag from existing details
-          await client
-            .api(`/planner/tasks/${taskId}/details`)
-            .header("If-Match", detailsEtag)
-            .patch(detailsData);
-          log("INFO", "Task details updated successfully", { taskId });
+          try {
+            // First, get existing details to obtain ETag
+            const existingDetails = await client
+              .api(`/planner/tasks/${taskId}/details`)
+              .get();
+            const detailsEtag = existingDetails["@odata.etag"];
+            log("INFO", "Got existing details", { taskId, detailsEtag, existingDetails });
+
+            await client
+              .api(`/planner/tasks/${taskId}/details`)
+              .header("If-Match", detailsEtag)
+              .patch(detailsData);
+            log("INFO", "Task details updated successfully", { taskId });
+          } catch (getError: any) {
+            // If details don't exist yet (404), create without If-Match header
+            if (getError?.code === "NotFound" || getError?.statusCode === 404) {
+              log("INFO", "Task details don't exist, creating new", { taskId });
+              await client
+                .api(`/planner/tasks/${taskId}/details`)
+                .patch(detailsData);
+              log("INFO", "Task details created successfully", { taskId });
+            } else {
+              throw getError; // Re-throw other errors
+            }
+          }
         }
 
         // Fetch the updated task to return current data. Expand details when the
-        // description was touched so the response actually includes the `details` key.
+        // description or checklist was touched so the response actually includes the `details` key.
         log("INFO", "Fetching updated task", { taskId });
-        const updatedTaskEndpoint = description !== undefined
+        const updatedTaskEndpoint = (description !== undefined || checklist !== undefined)
           ? `/planner/tasks/${taskId}?$expand=details`
           : `/planner/tasks/${taskId}`;
         const updatedTask = await client.api(updatedTaskEndpoint).get();

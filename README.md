@@ -8,6 +8,7 @@ A Model Context Protocol (MCP) server that enables Claude to interact with Micro
 - **Plans Management**: List and view Planner plans
 - **Buckets Management**: List, create, and manage buckets within plans
 - **Tasks Management**: Create, update, delete, and view tasks
+- **Checklists**: Add, update, and remove checklist items on tasks
 - **Token Persistence**: Stores access tokens across server restarts
 
 ## Prerequisites
@@ -94,8 +95,27 @@ Add this server to your Claude Desktop configuration file:
 - **`list_tasks`**: List tasks in a plan or bucket with filtering options (priority, due date, status, etc.)
 - **`get_task`**: Get detailed information about a specific task
 - **`create_task`**: Create a new task in a bucket with title, description, priority, and due date
-- **`update_task`**: Update an existing task (title, description, priority, bucket, due date, etc.)
+- **`update_task`**: Update an existing task (title, description, priority, bucket, due date, checklist, etc.)
 - **`delete_task`**: Delete a task
+
+**Checklist parameter** (on `create_task` and `update_task`): pass `checklist` as an object keyed by item ID, same style as `assignments`:
+- To **add** an item, use any unique string as the key with `{"title": "...", "isChecked": false}`
+- To **update** an item, use its existing item ID (from `get_task`/`list_tasks` with `includeDetails: true`) with just the fields to change
+- To **remove** an item, set its ID's value to `null`
+
+Example:
+```json
+{
+  "taskId": "your-task-id",
+  "checklist": {
+    "buy-milk": { "title": "Buy milk", "isChecked": false },
+    "existing-item-id-from-get-task": { "isChecked": true },
+    "item-id-to-remove": null
+  }
+}
+```
+
+Checklist items are visible on any task fetched via `get_task` or `list_tasks` with `includeDetails: true` (under `details.checklist`, keyed by item ID).
 
 **Priority Levels:**
 - `1` = Urgent (highest priority)
